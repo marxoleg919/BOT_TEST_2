@@ -26,31 +26,53 @@ def factorial_minus_one(n):
 def main():
     """
     Основная функция программы.
-    Принимает целое число от пользователя и выводит его факториал.
+    Показывает меню и позволяет пользователю выбирать команды.
     """
-    try:
-        # Получаем ввод от пользователя
-        number = int(input("Введите целое число: "))
-        
-        # Вычисляем факториал
-        result = factorial(number)
-        
-        # Вычисляем факториал минус 1
-        result_minus_one = factorial_minus_one(number)
-        
-        # Выводим результаты
-        print(f"Факториал числа {number} равен {result}")
-        print(f"Факториал числа {number} минус 1 равен {result_minus_one}")
-        
-    except ValueError as e:
-        if "invalid literal" in str(e):
-            print("Ошибка: Введите корректное целое число")
-        else:
-            print(f"Ошибка: {e}")
-    except KeyboardInterrupt:
-        print("\nПрограмма прервана пользователем")
-    except Exception as e:
-        print(f"Произошла ошибка: {e}")
+    print("Программа для работы с факториалом числа")
+    print("----------------------------------------")
+    while True:
+        print("\nВыберите команду:")
+        print("1 - Вычислить факториал числа")
+        print("2 - Вычислить факториал числа и вычесть 1")
+        print("3 - Выйти из программы")
+
+        command = input("Введите номер команды (1/2/3): ").strip()
+
+        if command == "3":
+            print("Выход из программы. До свидания!")
+            break
+
+        if command not in ("1", "2"):
+            print("Неизвестная команда. Пожалуйста, введите 1, 2 или 3.")
+            continue
+
+        try:
+            # Получаем ввод от пользователя
+            number = int(input("Введите целое число: "))
+
+            # Вычисляем факториал
+            result = factorial(number)
+
+            if command == "1":
+                # Команда 1: просто факториал
+                print(f"Факториал числа {number} равен {result}")
+            elif command == "2":
+                # Команда 2: факториал минус 1
+                result_minus_one = factorial_minus_one(number)
+                print(f"Факториал числа {number} равен {result}")
+                print(f"Факториал числа {number} минус 1 равен {result_minus_one}")
+
+        except ValueError as e:
+            # Ошибка преобразования строки в число
+            if "invalid literal" in str(e):
+                print("Ошибка: Введите корректное целое число.")
+            else:
+                print(f"Ошибка: {e}")
+        except KeyboardInterrupt:
+            print("\nПрограмма прервана пользователем.")
+            break
+        except Exception as e:
+            print(f"Произошла ошибка: {e}")
 
 
 if __name__ == "__main__":
