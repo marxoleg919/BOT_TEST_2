@@ -14,6 +14,15 @@ def factorial(n):
     return result
 
 
+def factorial_minus_one(n):
+    """
+    Вычисляет факториал числа n и вычитает из него 1.
+    Возвращает n! - 1
+    """
+    fact = factorial(n)
+    return fact - 1
+
+
 def main():
     """
     Основная функция программы.
@@ -26,8 +35,12 @@ def main():
         # Вычисляем факториал
         result = factorial(number)
         
-        # Выводим результат
+        # Вычисляем факториал минус 1
+        result_minus_one = factorial_minus_one(number)
+        
+        # Выводим результаты
         print(f"Факториал числа {number} равен {result}")
+        print(f"Факториал числа {number} минус 1 равен {result_minus_one}")
         
     except ValueError as e:
         if "invalid literal" in str(e):
