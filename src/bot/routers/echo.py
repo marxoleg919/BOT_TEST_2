@@ -2,15 +2,15 @@
 Роутер с простым эхо-функционалом.
 
 Содержит только обработчики Telegram-событий, бизнес-логика вынесена в services.
+Обрабатывает только текстовые сообщения, которые не являются командами.
 """
 
 import logging
 
 from aiogram import Router
-from aiogram.filters import CommandStart
 from aiogram.types import Message
 
-from src.bot.services.text import make_echo_reply, make_start_message
+from src.bot.services.text import make_echo_reply
 
 logger = logging.getLogger("bot")
 
@@ -31,23 +31,13 @@ def _format_user(message: Message) -> str:
     return f"id={user.id}, {username}, имя='{full_name}'"
 
 
-@router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
-    """
-    Обработчик команды /start.
-
-    Отправляет пользователю приветственное сообщение и логирует команду.
-    """
-    logger.info("Команда /start от пользователя: %s", _format_user(message))
-    await message.answer(make_start_message())
-
-
 @router.message()
 async def echo_message(message: Message) -> None:
     """
     Эхо-обработчик.
 
     Повторяет любое полученное текстовое сообщение и логирует его.
+    Обрабатывает только сообщения, которые не были обработаны другими роутерами.
     """
     logger.info(
         "Получено сообщение от пользователя %s: %r",
