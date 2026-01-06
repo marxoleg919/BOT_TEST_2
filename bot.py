@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
@@ -8,13 +9,30 @@ from aiogram.types import Message
 from dotenv import load_dotenv
 
 
-# Включаем базовую конфигурацию логирования
-# Логи можно будет сохранять в папку logs при необходимости
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+# Настройка логирования: вывод в консоль и запись в файл в папке logs
+LOGS_DIR = Path("logs")
+LOGS_DIR.mkdir(exist_ok=True)
+
+LOG_FILE_PATH = LOGS_DIR / "bot.log"
+
+logger = logging.getLogger("bot")
+logger.setLevel(logging.INFO)
+
+formatter = logging.Formatter(
+    "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
-logger = logging.getLogger(__name__)
+
+# Обработчик для записи логов в файл
+file_handler = logging.FileHandler(LOG_FILE_PATH, encoding="utf-8")
+file_handler.setFormatter(formatter)
+
+# Обработчик для вывода логов в консоль
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+
+if not logger.handlers:
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
 
 
 def load_config() -> str:
@@ -32,7 +50,22 @@ def load_config() -> str:
             "Не найден токен бота. "
             "Создайте файл .env и добавьте в него строку TELEGRAM_BOT_TOKEN=ВАШ_ТОКЕН"
         )
+    logger.info("Конфигурация загружена, токен бота получен из .env.")
     return token
+
+
+def format_user(message: Message) -> str:
+    """
+    Вспомогательная функция для формирования строки с информацией о пользователе.
+    Используется только для логирования.
+    """
+    user = message.from_user
+    if user is None:
+        return "неизвестный пользователь"
+
+    username = f"@{user.username}" if user.username else "без username"
+    full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+    return f"id={user.id}, {username}, имя='{full_name}'"
 
 
 async def start_handler(message: Message) -> None:
@@ -40,6 +73,8 @@ async def start_handler(message: Message) -> None:
     Обработчик команды /start.
     Отправляет пользователю приветственное сообщение.
     """
+    # Логируем команду /start с информацией о пользователе
+    logger.info("Команда /start от пользователя: %s", format_user(message))
     await message.answer(
         "Привет! Я простой эхо-бот.\n"
         "Напиши мне любое сообщение, и я повторю его обратно."
@@ -49,8 +84,15 @@ async def start_handler(message: Message) -> None:
 async def echo_handler(message: Message) -> None:
     """
     Эхо-обработчик.
-    Повторяет любое полученное текстовое сообщение.
+    Повторяет любое полученное текстовое сообщение и логирует его.
     """
+    # Логируем текст входящего сообщения
+    logger.info(
+        "Получено сообщение от пользователя %s: %r",
+        format_user(message),
+        message.text,
+    )
+
     # Отвечаем тем же текстом, который прислал пользователь
     await message.answer(message.text)
 
