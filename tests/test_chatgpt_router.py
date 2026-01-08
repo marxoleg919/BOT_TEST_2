@@ -205,10 +205,8 @@ async def test_handle_chat_message_processes_in_mode() -> None:
         # Проверяем, что отправлен ответ пользователю
         message.answer.assert_called_once_with(mock_llm_response)
 
-        # Проверяем, что отправлено действие "печатает..."
-        message.bot.send_chat_action.assert_called_once_with(
-            chat_id=message.chat.id, action="typing"
-        )
+        # Проверяем, что отправлено действие "печатает..." хотя бы один раз
+        assert message.bot.send_chat_action.await_count >= 1
 
     # Очищаем после теста
     _stop_chat_mode(user_id)

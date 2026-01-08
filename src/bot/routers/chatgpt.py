@@ -4,7 +4,9 @@
 Обрабатывает команду запуска ChatGPT-режима и текстовые сообщения в этом режиме.
 """
 
+import asyncio
 import logging
+from contextlib import suppress
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -145,11 +147,13 @@ async def handle_chat_message(message: Message, config: BotConfig) -> None:
         user_text[:100],  # Логируем только первые 100 символов
     )
 
-    try:
-        # Отправляем действие "печатает..."
-        bot = message.bot
-        await bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    bot = message.bot
+    stop_typing = asyncio.Event()
+    typing_task = asyncio.create_task(
+        _typing_loop(bot=bot, chat_id=message.chat.id, stop_event=stop_typing)
+    )
 
+    try:
         # Проверяем наличие API ключа
         if not config.openrouter_api_key:
             await message.answer(
@@ -211,4 +215,29 @@ async def handle_chat_message(message: Message, config: BotConfig) -> None:
             "❌ Произошла ошибка при обработке запроса.\n\n"
             "Попробуйте позже или используйте команду /stop для выхода из режима."
         )
+
+    finally:
+        stop_typing.set()
+        typing_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await typing_task
+
+
+async def _typing_loop(bot, chat_id: int, stop_event: asyncio.Event, interval: float = 4.0) -> None:
+    """
+    Отправляет action "typing" пока не будет остановлен stop_event.
+
+    Telegram показывает статус ~5 секунд, поэтому повторяем каждые 4 секунды,
+    пока обрабатываем запрос к LLM.
+    """
+    try:
+        while not stop_event.is_set():
+            await bot.send_chat_action(chat_id=chat_id, action="typing")
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval)
+            except asyncio.TimeoutError:
+                continue
+    except Exception:
+        # Не падаем из-за ошибок отправки "typing"
+        return
 
