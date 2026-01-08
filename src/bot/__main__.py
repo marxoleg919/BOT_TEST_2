@@ -6,7 +6,7 @@
 
 import asyncio
 
-from src.bot.main import main
+from .main import main
 
 
 if __name__ == "__main__":
