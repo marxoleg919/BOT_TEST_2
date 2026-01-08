@@ -10,7 +10,10 @@ import aiohttp
 
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "openai/gpt-4o-mini"
+# Бесплатная модель Llama 3.2 3B Instruct от Meta
+# Суффикс :free указывает на бесплатный вариант модели
+# Лимиты: 20 запросов/день без кредитов, 200 запросов/день с кредитами $5+
+DEFAULT_MODEL = "meta-llama/llama-3.2-3b-instruct:free"
 
 
 async def get_llm_response(
