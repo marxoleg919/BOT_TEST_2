@@ -11,7 +11,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from src.bot.services.llm import RateLimitError, get_llm_response
+from src.bot.services.llm import ModelNotFoundError, RateLimitError, get_llm_response
 
 logger = logging.getLogger("bot")
 
@@ -182,6 +182,17 @@ async def handle_chat_message(message: Message) -> None:
             "• 20 запросов/день без кредитов\n"
             "• 200 запросов/день с кредитами $5+\n\n"
             "Попробуйте позже или используйте команду /stop для выхода из режима."
+        )
+
+    except ModelNotFoundError as e:
+        logger.error(
+            "Модель не найдена для пользователя %s: %s",
+            user.id,
+            e,
+        )
+        await message.answer(
+            "❌ Модель временно недоступна.\n\n"
+            "Обратитесь к администратору для настройки другой модели."
         )
 
     except Exception as e:

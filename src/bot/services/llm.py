@@ -10,14 +10,21 @@ import aiohttp
 
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-# Бесплатная модель Google Gemma 2 9B
+# Бесплатная модель Mistral 7B Instruct
 # Суффикс :free указывает на бесплатный вариант модели
 # Лимиты: 20 запросов/день без кредитов, 200 запросов/день с кредитами $5+
-DEFAULT_MODEL = "google/gemma-2-9b-it:free"
+# Список бесплатных моделей: https://openrouter.ai/models?max_price=0
+DEFAULT_MODEL = "mistralai/mistral-7b-instruct:free"
 
 
 class RateLimitError(Exception):
     """Исключение при превышении лимита запросов (429)."""
+
+    pass
+
+
+class ModelNotFoundError(Exception):
+    """Исключение, когда модель не найдена (404)."""
 
     pass
 
@@ -59,6 +66,12 @@ async def get_llm_response(
                 raise RateLimitError(
                     "Превышен лимит запросов. Бесплатные модели имеют ограничения. "
                     "Попробуйте позже или используйте платную модель."
+                )
+
+            if response.status == 404:
+                raise ModelNotFoundError(
+                    f"Модель {model} не найдена. "
+                    "Проверьте список доступных моделей: https://openrouter.ai/models"
                 )
 
             if response.status != 200:
