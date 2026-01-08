@@ -5,7 +5,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from src.bot.services.llm import get_llm_response, DEFAULT_MODEL
+from src.bot.services.llm import get_llm_response, DEFAULT_MODEL, RateLimitError
 
 
 @pytest.mark.asyncio
@@ -109,6 +109,29 @@ async def test_get_llm_response_custom_model() -> None:
         assert call_args is not None
         payload = call_args[1]["json"]
         assert payload["model"] == custom_model
+
+
+@pytest.mark.asyncio
+async def test_get_llm_response_rate_limit_error() -> None:
+    """Тест обработки ошибки rate limit (429 статус)."""
+    api_key = "test_api_key"
+    messages = [{"role": "user", "content": "Тест"}]
+
+    with patch("aiohttp.ClientSession") as mock_session:
+        mock_response = AsyncMock()
+        mock_response.status = 429
+
+        mock_post = AsyncMock()
+        mock_post.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_post.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session.return_value.__aenter__ = AsyncMock()
+        mock_session.return_value.__aenter__.return_value.post = AsyncMock(
+            return_value=mock_post
+        )
+
+        with pytest.raises(RateLimitError, match="Превышен лимит запросов"):
+            await get_llm_response(api_key, messages)
 
 
 @pytest.mark.asyncio

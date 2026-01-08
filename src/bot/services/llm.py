@@ -10,10 +10,16 @@ import aiohttp
 
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-# Бесплатная модель Llama 3.2 3B Instruct от Meta
+# Бесплатная модель Google Gemma 2 9B
 # Суффикс :free указывает на бесплатный вариант модели
 # Лимиты: 20 запросов/день без кредитов, 200 запросов/день с кредитами $5+
-DEFAULT_MODEL = "meta-llama/llama-3.2-3b-instruct:free"
+DEFAULT_MODEL = "google/gemma-2-9b-it:free"
+
+
+class RateLimitError(Exception):
+    """Исключение при превышении лимита запросов (429)."""
+
+    pass
 
 
 async def get_llm_response(
@@ -49,6 +55,12 @@ async def get_llm_response(
 
     async with aiohttp.ClientSession() as session:
         async with session.post(OPENROUTER_API_URL, headers=headers, json=payload) as response:
+            if response.status == 429:
+                raise RateLimitError(
+                    "Превышен лимит запросов. Бесплатные модели имеют ограничения. "
+                    "Попробуйте позже или используйте платную модель."
+                )
+
             if response.status != 200:
                 error_text = await response.text()
                 raise ValueError(

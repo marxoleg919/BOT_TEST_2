@@ -11,7 +11,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from src.bot.services.llm import get_llm_response
+from src.bot.services.llm import RateLimitError, get_llm_response
 
 logger = logging.getLogger("bot")
 
@@ -170,6 +170,20 @@ async def handle_chat_message(message: Message) -> None:
         # Отправляем ответ пользователю
         await message.answer(response_text)
 
+    except RateLimitError as e:
+        logger.warning(
+            "Rate limit для пользователя %s: %s",
+            user.id,
+            e,
+        )
+        await message.answer(
+            "⏳ Превышен лимит запросов к бесплатной модели.\n\n"
+            "Бесплатные модели имеют ограничения:\n"
+            "• 20 запросов/день без кредитов\n"
+            "• 200 запросов/день с кредитами $5+\n\n"
+            "Попробуйте позже или используйте команду /stop для выхода из режима."
+        )
+
     except Exception as e:
         logger.error(
             "Ошибка при обработке сообщения в режиме ChatGPT: %s",
@@ -177,7 +191,7 @@ async def handle_chat_message(message: Message) -> None:
             exc_info=True,
         )
         await message.answer(
-            f"❌ Произошла ошибка при обработке запроса: {str(e)}\n\n"
+            "❌ Произошла ошибка при обработке запроса.\n\n"
             "Попробуйте позже или используйте команду /stop для выхода из режима."
         )
 
