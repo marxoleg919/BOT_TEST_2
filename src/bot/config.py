@@ -16,6 +16,7 @@ class BotConfig:
     """Конфигурация Telegram-бота."""
 
     bot_token: str
+    openrouter_api_key: str | None = None
 
 
 def load_config() -> BotConfig:
@@ -23,6 +24,7 @@ def load_config() -> BotConfig:
     Загружает конфигурацию приложения из переменных окружения.
 
     Ожидается, что токен бота лежит в переменной TELEGRAM_BOT_TOKEN.
+    OPENROUTER_API_KEY опционален (нужен только для команды /chatgpt).
     """
     # Загружаем переменные окружения из файла .env (если он есть)
     load_dotenv()
@@ -35,6 +37,8 @@ def load_config() -> BotConfig:
             "TELEGRAM_BOT_TOKEN=ВАШ_ТОКЕН"
         )
 
-    return BotConfig(bot_token=token)
+    openrouter_key = os.getenv("OPENROUTER_API_KEY")
+
+    return BotConfig(bot_token=token, openrouter_api_key=openrouter_key)
 
 

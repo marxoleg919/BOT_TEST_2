@@ -6,7 +6,7 @@
 
 from aiogram import Router
 
-from . import echo, start, profile, premium, language, help
+from . import chatgpt, echo, start, profile, premium, language, help
 
 
 def get_main_router() -> Router:
@@ -21,6 +21,8 @@ def get_main_router() -> Router:
     router.include_router(premium.router)
     router.include_router(language.router)
     router.include_router(help.router)
+    # Роутер ChatGPT подключаем перед echo, чтобы перехватывать сообщения в режиме диалога
+    router.include_router(chatgpt.router)
     # Эхо-роутер подключаем последним, чтобы он обрабатывал только неизвестные сообщения
     router.include_router(echo.router)
     return router

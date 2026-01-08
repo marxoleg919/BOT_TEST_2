@@ -17,6 +17,7 @@ async def set_bot_commands(bot: Bot) -> None:
     """
     commands = [
         BotCommand(command="start", description="Restart bot (Выбрать нейросеть)"),
+        BotCommand(command="chatgpt", description="ChatGPT mode (Режим ChatGPT)"),
         BotCommand(command="profile", description="Profile (Профиль)"),
         BotCommand(command="premium", description="Premium"),
         BotCommand(command="language", description="Language (Язык)"),
