@@ -14,13 +14,33 @@ from src.bot.services.text import (
 )
 
 
-def test_make_echo_reply_returns_same_text() -> None:
-    """Функция эхо-сервиса должна возвращать тот же самый текст."""
+def test_make_echo_reply_returns_same_text_for_non_numbers() -> None:
+    """Для нечислового текста функция должна возвращать тот же самый текст."""
     text = "Привет, бот!"
 
     result = make_echo_reply(text)
 
     assert result == text
+
+
+def test_make_echo_reply_adds_100_for_integer_text() -> None:
+    """
+    Если пользователь присылает число, бот должен вернуть число + 100.
+    """
+    input_text = "42"
+
+    result = make_echo_reply(input_text)
+
+    assert result == "142"
+
+
+def test_make_echo_reply_ignores_spaces_around_number() -> None:
+    """Пробелы вокруг числа не должны мешать интерпретации как числа."""
+    input_text = "   5  "
+
+    result = make_echo_reply(input_text)
+
+    assert result == "105"
 
 
 def test_make_start_message_contains_expected_phrases() -> None:
