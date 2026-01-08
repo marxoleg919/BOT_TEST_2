@@ -36,6 +36,15 @@ pip install -r requirements.txt
 ```env
 TELEGRAM_BOT_TOKEN=ВАШ_ТОКЕН_ОТ_BOTFATHER
 OPENROUTER_API_KEY=ВАШ_КЛЮЧ_OPENROUTER  # Опционально, нужен для команды /chatgpt
+LLM_MODEL=mistralai/mistral-7b-instruct:free
+# OPENROUTER_API_URL=https://openrouter.ai/api/v1/chat/completions
+# LLM_TIMEOUT_SEC=20
+# LLM_RETRIES=3
+# LLM_REFERER=https://example.com
+# CHAT_HISTORY_BACKEND=memory  # или redis
+# REDIS_URL=redis://localhost:6379/0
+# HISTORY_MAX_MESSAGES=20
+# HISTORY_TTL_SEC=86400
 ```
 
 > **Примечание:** `OPENROUTER_API_KEY` опционален. Если вы не планируете использовать команду `/chatgpt`, можете не указывать этот ключ. Получить ключ можно на [openrouter.ai](https://openrouter.ai/).
@@ -77,5 +86,24 @@ python -m src.bot
 
 - Логи пишутся в папку `logs`, файл `logs/bot.log`.
 - Логируются запуски бота, команды и текстовые сообщения пользователей (без конфиденциальных данных).
+
+### Переменные окружения
+
+Минимально необходимые:
+- `TELEGRAM_BOT_TOKEN` — токен бота.
+
+Для работы с LLM:
+- `OPENROUTER_API_KEY` — ключ OpenRouter (для `/chatgpt`).
+- `LLM_MODEL` — идентификатор модели (по умолчанию `mistralai/mistral-7b-instruct:free`).
+- `OPENROUTER_API_URL` — URL API (по умолчанию OpenRouter).
+- `LLM_TIMEOUT_SEC` — таймаут запроса к LLM (по умолчанию 20).
+- `LLM_RETRIES` — количество ретраев на 5xx/сетевые ошибки (по умолчанию 3).
+- `LLM_REFERER` — опциональный реферер для аналитики.
+
+Хранилище истории диалогов:
+- `CHAT_HISTORY_BACKEND` — `memory` или `redis` (по умолчанию `memory`).
+- `REDIS_URL` — строка подключения к Redis (нужна, если выбран backend `redis`).
+- `HISTORY_MAX_MESSAGES` — лимит сообщений истории на пользователя (по умолчанию 20).
+- `HISTORY_TTL_SEC` — TTL истории в секундах (по умолчанию 86400, 24 часа).
 
 

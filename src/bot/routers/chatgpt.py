@@ -13,64 +13,25 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from src.bot.config import BotConfig
-from src.bot.services.llm import ModelNotFoundError, RateLimitError, get_llm_response
+from src.bot.services.history import ChatHistoryRepository
+from src.bot.services.llm import (
+    LLMClient,
+    LLMTimeoutError,
+    ModelNotFoundError,
+    RateLimitError,
+    UpstreamError,
+)
 from src.bot.utils.formatting import format_user_for_log
 
 logger = logging.getLogger("bot")
 
 router = Router()
 
-# Максимальное количество сообщений в истории диалога (пар user + assistant)
-MAX_HISTORY_MESSAGES = 20
-
-# Хранилище истории диалогов: user_id -> список сообщений
-# Формат: [{"role": "user", "content": "текст"}, {"role": "assistant", "content": "ответ"}]
-_chat_histories: dict[int, list[dict[str, str]]] = {}
-
-
-def _is_in_chat_mode(user_id: int) -> bool:
-    """Проверяет, находится ли пользователь в режиме ChatGPT."""
-    return user_id in _chat_histories
-
-
-def _start_chat_mode(user_id: int) -> None:
-    """Начинает режим ChatGPT для пользователя."""
-    _chat_histories[user_id] = []
-
-
-def _stop_chat_mode(user_id: int) -> None:
-    """Останавливает режим ChatGPT для пользователя."""
-    _chat_histories.pop(user_id, None)
-
-
-def _add_user_message(user_id: int, content: str) -> None:
-    """Добавляет сообщение пользователя в историю."""
-    if user_id not in _chat_histories:
-        _start_chat_mode(user_id)
-    _chat_histories[user_id].append({"role": "user", "content": content})
-    _trim_history(user_id)
-
-
-def _add_assistant_message(user_id: int, content: str) -> None:
-    """Добавляет ответ ассистента в историю."""
-    if user_id not in _chat_histories:
-        _start_chat_mode(user_id)
-    _chat_histories[user_id].append({"role": "assistant", "content": content})
-    _trim_history(user_id)
-
-
-def _trim_history(user_id: int) -> None:
-    """Обрезает историю диалога до максимального размера."""
-    if user_id not in _chat_histories:
-        return
-    history = _chat_histories[user_id]
-    if len(history) > MAX_HISTORY_MESSAGES:
-        # Удаляем старые сообщения, сохраняя последние MAX_HISTORY_MESSAGES
-        _chat_histories[user_id] = history[-MAX_HISTORY_MESSAGES:]
-
 
 @router.message(Command("chatgpt"))
-async def cmd_chatgpt(message: Message) -> None:
+async def cmd_chatgpt(
+    message: Message, history_repo: ChatHistoryRepository
+) -> None:
     """
     Обработчик команды /chatgpt.
 
@@ -83,7 +44,7 @@ async def cmd_chatgpt(message: Message) -> None:
 
     logger.info("Команда /chatgpt от пользователя: %s", format_user_for_log(message))
 
-    _start_chat_mode(user.id)
+    await history_repo.start_session(user.id)
     await message.answer(
         "🤖 Режим ChatGPT активирован!\n\n"
         "Теперь я буду отвечать как обычная LLM. "
@@ -93,7 +54,7 @@ async def cmd_chatgpt(message: Message) -> None:
 
 
 @router.message(Command("stop"))
-async def cmd_stop(message: Message) -> None:
+async def cmd_stop(message: Message, history_repo: ChatHistoryRepository) -> None:
     """
     Обработчик команды /stop.
 
@@ -106,15 +67,20 @@ async def cmd_stop(message: Message) -> None:
 
     logger.info("Команда /stop от пользователя: %s", format_user_for_log(message))
 
-    if _is_in_chat_mode(user.id):
-        _stop_chat_mode(user.id)
+    if await history_repo.is_active(user.id):
+        await history_repo.stop_session(user.id)
         await message.answer("✅ Режим ChatGPT деактивирован.")
     else:
         await message.answer("ℹ️ Вы не находитесь в режиме ChatGPT.")
 
 
 @router.message()
-async def handle_chat_message(message: Message, config: BotConfig) -> None:
+async def handle_chat_message(
+    message: Message,
+    config: BotConfig,
+    history_repo: ChatHistoryRepository,
+    llm_client: LLMClient,
+) -> None:
     """
     Обработчик текстовых сообщений в режиме ChatGPT.
 
@@ -129,7 +95,7 @@ async def handle_chat_message(message: Message, config: BotConfig) -> None:
         return
 
     # Проверяем, что пользователь в режиме ChatGPT
-    if not _is_in_chat_mode(user.id):
+    if not await history_repo.is_active(user.id):
         return
 
     # Пропускаем команды (они обрабатываются другими роутерами)
@@ -164,18 +130,20 @@ async def handle_chat_message(message: Message, config: BotConfig) -> None:
             return
 
         # Добавляем сообщение пользователя в историю
-        _add_user_message(user.id, user_text)
+        await history_repo.add_user_message(user.id, user_text)
 
         # Получаем историю диалога
-        history = _chat_histories[user.id].copy()
+        history = await history_repo.get_history(user.id)
 
         # Отправляем запрос к LLM с моделью из конфигурации
-        response_text = await get_llm_response(
-            config.openrouter_api_key, history, model=config.llm_model
+        response_text = await llm_client.get_response(
+            api_key=config.openrouter_api_key,
+            messages=history,
+            model=config.llm_model,
         )
 
         # Добавляем ответ в историю
-        _add_assistant_message(user.id, response_text)
+        await history_repo.add_assistant_message(user.id, response_text)
 
         # Отправляем ответ пользователю
         await message.answer(response_text)
@@ -205,6 +173,18 @@ async def handle_chat_message(message: Message, config: BotConfig) -> None:
             "Обратитесь к администратору для настройки другой модели."
         )
 
+    except LLMTimeoutError as e:
+        logger.warning("Таймаут LLM для пользователя %s: %s", user.id, e)
+        await message.answer(
+            "⏳ Превышено время ожидания ответа модели. "
+            "Попробуйте ещё раз или выйдите из режима /stop."
+        )
+    except UpstreamError as e:
+        logger.error("Upstream ошибка для пользователя %s: %s", user.id, e)
+        await message.answer(
+            "❌ Провайдер временно недоступен. "
+            "Попробуйте позже или используйте /stop для выхода из режима."
+        )
     except Exception as e:
         logger.error(
             "Ошибка при обработке сообщения в режиме ChatGPT: %s",

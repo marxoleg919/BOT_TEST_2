@@ -6,7 +6,7 @@ from typing import List
 
 from aiogram.types import BotCommand
 
-from src.bot.utils.commands import set_bot_commands
+from src.bot.utils.commands import COMMANDS_SPEC, set_bot_commands
 
 
 class DummyBot:
@@ -39,6 +39,8 @@ async def test_set_bot_commands_sets_expected_commands() -> None:
     # Ожидаемый набор команд из утилиты
     expected_commands = {
         "start": "Restart bot (Выбрать нейросеть)",
+        "chatgpt": "ChatGPT mode (Режим ChatGPT)",
+        "stop": "Stop ChatGPT mode (Выйти из режима ChatGPT)",
         "profile": "Profile (Профиль)",
         "premium": "Premium",
         "language": "Language (Язык)",
@@ -46,5 +48,9 @@ async def test_set_bot_commands_sets_expected_commands() -> None:
     }
 
     assert commands_by_name == expected_commands
+
+    # Проверяем отсутствие дубликатов в спецификации
+    names = [spec.name for spec in COMMANDS_SPEC]
+    assert len(names) == len(set(names))
 
 

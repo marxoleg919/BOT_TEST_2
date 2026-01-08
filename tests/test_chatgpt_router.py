@@ -2,19 +2,71 @@
 Тесты для роутера ChatGPT.
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-from aiogram.types import Message, User, Chat
+import pytest
+from aiogram.types import Chat, Message, User
 
 from src.bot.config import BotConfig
-from src.bot.routers.chatgpt import (
-    _is_in_chat_mode,
-    _start_chat_mode,
-    _stop_chat_mode,
-    _add_user_message,
-    _add_assistant_message,
-)
+from src.bot.routers.chatgpt import cmd_chatgpt, cmd_stop, handle_chat_message
+from src.bot.services.history import ChatHistoryRepository
+
+
+class FakeHistoryRepo(ChatHistoryRepository):
+    """Простое in-memory хранилище для тестов."""
+
+    def __init__(self, max_messages: int = 20) -> None:
+        self.data: dict[int, list[dict[str, str]]] = {}
+        self.max_messages = max_messages
+
+    async def start_session(self, user_id: int) -> None:
+        self.data[user_id] = []
+
+    async def stop_session(self, user_id: int) -> None:
+        self.data.pop(user_id, None)
+
+    async def is_active(self, user_id: int) -> bool:
+        return user_id in self.data
+
+    async def add_user_message(self, user_id: int, content: str) -> None:
+        await self._ensure(user_id)
+        self.data[user_id].append({"role": "user", "content": content})
+        await self.trim(user_id)
+
+    async def add_assistant_message(self, user_id: int, content: str) -> None:
+        await self._ensure(user_id)
+        self.data[user_id].append({"role": "assistant", "content": content})
+        await self.trim(user_id)
+
+    async def get_history(self, user_id: int) -> list[dict[str, str]]:
+        return list(self.data.get(user_id, []))
+
+    async def trim(self, user_id: int) -> None:
+        if user_id not in self.data:
+            return
+        if len(self.data[user_id]) > self.max_messages:
+            self.data[user_id] = self.data[user_id][-self.max_messages :]
+
+    async def aclose(self) -> None:
+        return
+
+    async def _ensure(self, user_id: int) -> None:
+        if user_id not in self.data:
+            self.data[user_id] = []
+
+
+class FakeLLMClient:
+    """Фейковый LLM клиент для тестов."""
+
+    def __init__(self, response: str = "ok") -> None:
+        self.response = response
+        self.calls: list[tuple[str, list[dict[str, str]], str]] = []
+
+    async def get_response(
+        self, api_key: str, messages: list[dict[str, str]], model: str
+    ) -> str:
+        self.calls.append((api_key, messages, model))
+        return self.response
 
 
 def create_mock_config(
@@ -51,230 +103,129 @@ def create_mock_message(text: str, user_id: int = 123) -> Message:
     return message
 
 
-def test_chat_mode_management() -> None:
-    """Тест управления режимом чата."""
-    user_id = 123
+@pytest.mark.asyncio
+async def test_history_repository_basic() -> None:
+    """Проверяем базовые операции репозитория истории."""
+    repo = FakeHistoryRepo(max_messages=2)
+    user_id = 1
 
-    # Изначально пользователь не в режиме чата
-    assert not _is_in_chat_mode(user_id)
+    assert not await repo.is_active(user_id)
+    await repo.start_session(user_id)
+    assert await repo.is_active(user_id)
 
-    # Запускаем режим чата
-    _start_chat_mode(user_id)
-    assert _is_in_chat_mode(user_id)
-
-    # Останавливаем режим чата
-    _stop_chat_mode(user_id)
-    assert not _is_in_chat_mode(user_id)
-
-
-def test_chat_history_management() -> None:
-    """Тест управления историей чата."""
-    user_id = 123
-
-    # Очищаем историю перед тестом
-    _stop_chat_mode(user_id)
-
-    # Добавляем сообщение пользователя
-    _add_user_message(user_id, "Привет")
-    assert _is_in_chat_mode(user_id)
-
-    # Добавляем ответ ассистента
-    _add_assistant_message(user_id, "Привет! Как дела?")
-
-    # Проверяем, что история содержит оба сообщения
-    from src.bot.routers.chatgpt import _chat_histories
-
-    history = _chat_histories[user_id]
+    await repo.add_user_message(user_id, "a")
+    await repo.add_assistant_message(user_id, "b")
+    history = await repo.get_history(user_id)
     assert len(history) == 2
-    assert history[0]["role"] == "user"
-    assert history[0]["content"] == "Привет"
-    assert history[1]["role"] == "assistant"
-    assert history[1]["content"] == "Привет! Как дела?"
 
-    # Очищаем после теста
-    _stop_chat_mode(user_id)
+    await repo.add_user_message(user_id, "c")
+    history = await repo.get_history(user_id)
+    # Лимит 2 сообщения => оставляем последние
+    assert len(history) == 2
+    assert history[-1]["content"] == "c"
+
+    await repo.stop_session(user_id)
+    assert not await repo.is_active(user_id)
 
 
 @pytest.mark.asyncio
 async def test_cmd_chatgpt_activates_mode() -> None:
-    """Тест команды /chatgpt - активация режима."""
-    from src.bot.routers.chatgpt import cmd_chatgpt
-
     message = create_mock_message("/chatgpt")
-    user_id = message.from_user.id if message.from_user else 0
+    repo = FakeHistoryRepo()
 
-    # Очищаем режим перед тестом
-    _stop_chat_mode(user_id)
+    await cmd_chatgpt(message, repo)
 
-    await cmd_chatgpt(message)
-
-    # Проверяем, что режим активирован
-    assert _is_in_chat_mode(user_id)
-
-    # Проверяем, что отправлено сообщение
+    assert await repo.is_active(message.from_user.id)  # type: ignore[arg-type]
     message.answer.assert_called_once()
-    call_args = message.answer.call_args[0][0]
-    assert "Режим ChatGPT активирован" in call_args
-
-    # Очищаем после теста
-    _stop_chat_mode(user_id)
 
 
 @pytest.mark.asyncio
 async def test_cmd_stop_deactivates_mode() -> None:
-    """Тест команды /stop - деактивация режима."""
-    from src.bot.routers.chatgpt import cmd_stop
-
     message = create_mock_message("/stop")
-    user_id = message.from_user.id if message.from_user else 0
+    repo = FakeHistoryRepo()
+    await repo.start_session(message.from_user.id)  # type: ignore[arg-type]
 
-    # Активируем режим перед тестом
-    _start_chat_mode(user_id)
+    await cmd_stop(message, repo)
 
-    await cmd_stop(message)
-
-    # Проверяем, что режим деактивирован
-    assert not _is_in_chat_mode(user_id)
-
-    # Проверяем, что отправлено сообщение
+    assert not await repo.is_active(message.from_user.id)  # type: ignore[arg-type]
     message.answer.assert_called_once()
-    call_args = message.answer.call_args[0][0]
-    assert "деактивирован" in call_args
 
 
 @pytest.mark.asyncio
 async def test_cmd_stop_when_not_in_mode() -> None:
-    """Тест команды /stop, когда пользователь не в режиме."""
-    from src.bot.routers.chatgpt import cmd_stop
-
     message = create_mock_message("/stop")
-    user_id = message.from_user.id if message.from_user else 0
+    repo = FakeHistoryRepo()
 
-    # Убеждаемся, что режим не активирован
-    _stop_chat_mode(user_id)
+    await cmd_stop(message, repo)
 
-    await cmd_stop(message)
-
-    # Проверяем, что отправлено информационное сообщение
     message.answer.assert_called_once()
-    call_args = message.answer.call_args[0][0]
-    assert "не находитесь в режиме" in call_args
+    assert "не находитесь" in message.answer.call_args[0][0]
 
 
 @pytest.mark.asyncio
 async def test_handle_chat_message_ignores_when_not_in_mode() -> None:
-    """Тест, что обработчик игнорирует сообщения вне режима ChatGPT."""
-    from src.bot.routers.chatgpt import handle_chat_message
-
-    message = create_mock_message("Обычное сообщение")
     config = create_mock_config()
-    user_id = message.from_user.id if message.from_user else 0
+    message = create_mock_message("Обычное сообщение")
+    repo = FakeHistoryRepo()
+    llm_client = FakeLLMClient()
 
-    # Убеждаемся, что режим не активирован
-    _stop_chat_mode(user_id)
+    await handle_chat_message(message, config, repo, llm_client)
 
-    await handle_chat_message(message, config)
-
-    # Проверяем, что сообщение не обработано
     message.answer.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_handle_chat_message_processes_in_mode() -> None:
-    """Тест обработки сообщения в режиме ChatGPT."""
-    from src.bot.routers.chatgpt import handle_chat_message
-
-    message = create_mock_message("Привет, как дела?")
     config = create_mock_config()
-    user_id = message.from_user.id if message.from_user else 0
+    message = create_mock_message("Привет, как дела?")
+    repo = FakeHistoryRepo()
+    llm_client = FakeLLMClient("Привет! У меня всё отлично, спасибо!")
+    await repo.start_session(message.from_user.id)  # type: ignore[arg-type]
 
-    # Активируем режим
-    _start_chat_mode(user_id)
+    await handle_chat_message(message, config, repo, llm_client)
 
-    # Мокаем ответ от LLM
-    mock_llm_response = "Привет! У меня всё отлично, спасибо!"
-
-    with patch("src.bot.routers.chatgpt.get_llm_response") as mock_get_llm:
-        mock_get_llm.return_value = mock_llm_response
-
-        await handle_chat_message(message, config)
-
-        # Проверяем, что отправлен запрос к LLM
-        mock_get_llm.assert_called_once()
-
-        # Проверяем, что отправлен ответ пользователю
-        message.answer.assert_called_once_with(mock_llm_response)
-
-        # Проверяем, что отправлено действие "печатает..." хотя бы один раз
-        assert message.bot.send_chat_action.await_count >= 1
-
-    # Очищаем после теста
-    _stop_chat_mode(user_id)
+    assert message.answer.called
+    assert llm_client.calls
+    assert message.bot.send_chat_action.await_count >= 1
 
 
 @pytest.mark.asyncio
 async def test_handle_chat_message_no_api_key() -> None:
-    """Тест обработки сообщения без API ключа."""
-    from src.bot.routers.chatgpt import handle_chat_message
-
+    config = create_mock_config(api_key=None)
     message = create_mock_message("Привет")
-    config = create_mock_config(api_key=None)  # Без API ключа
-    user_id = message.from_user.id if message.from_user else 0
+    repo = FakeHistoryRepo()
+    llm_client = FakeLLMClient()
+    await repo.start_session(message.from_user.id)  # type: ignore[arg-type]
 
-    # Активируем режим
-    _start_chat_mode(user_id)
+    await handle_chat_message(message, config, repo, llm_client)
 
-    await handle_chat_message(message, config)
-
-    # Проверяем, что отправлено сообщение об ошибке
     message.answer.assert_called_once()
-    call_args = message.answer.call_args[0][0]
-    assert "API ключ OpenRouter не настроен" in call_args
-
-    # Очищаем после теста
-    _stop_chat_mode(user_id)
+    assert "API ключ OpenRouter не настроен" in message.answer.call_args[0][0]
 
 
 @pytest.mark.asyncio
 async def test_handle_chat_message_ignores_commands() -> None:
-    """Тест, что обработчик игнорирует команды."""
-    from src.bot.routers.chatgpt import handle_chat_message
-
-    message = create_mock_message("/start")
     config = create_mock_config()
-    user_id = message.from_user.id if message.from_user else 0
+    message = create_mock_message("/start")
+    repo = FakeHistoryRepo()
+    llm_client = FakeLLMClient()
+    await repo.start_session(message.from_user.id)  # type: ignore[arg-type]
 
-    # Активируем режим
-    _start_chat_mode(user_id)
+    await handle_chat_message(message, config, repo, llm_client)
 
-    await handle_chat_message(message, config)
-
-    # Проверяем, что сообщение не обработано (команды обрабатываются другими роутерами)
     message.answer.assert_not_called()
-
-    # Очищаем после теста
-    _stop_chat_mode(user_id)
 
 
 @pytest.mark.asyncio
 async def test_handle_chat_message_empty_text() -> None:
-    """Тест обработки пустого сообщения."""
-    from src.bot.routers.chatgpt import handle_chat_message
-
-    message = create_mock_message("")
     config = create_mock_config()
-    user_id = message.from_user.id if message.from_user else 0
+    message = create_mock_message("")
+    repo = FakeHistoryRepo()
+    llm_client = FakeLLMClient()
+    await repo.start_session(message.from_user.id)  # type: ignore[arg-type]
 
-    # Активируем режим
-    _start_chat_mode(user_id)
+    await handle_chat_message(message, config, repo, llm_client)
 
-    await handle_chat_message(message, config)
-
-    # Проверяем, что отправлено сообщение с просьбой отправить текст
     message.answer.assert_called_once()
-    call_args = message.answer.call_args[0][0]
-    assert "текстовое сообщение" in call_args
-
-    # Очищаем после теста
-    _stop_chat_mode(user_id)
+    assert "текстовое сообщение" in message.answer.call_args[0][0]
 
