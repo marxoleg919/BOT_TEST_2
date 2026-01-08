@@ -11,12 +11,17 @@ import os
 from dotenv import load_dotenv
 
 
+# Модель LLM по умолчанию для OpenRouter
+DEFAULT_LLM_MODEL = "mistralai/mistral-7b-instruct:free"
+
+
 @dataclass
 class BotConfig:
     """Конфигурация Telegram-бота."""
 
     bot_token: str
     openrouter_api_key: str | None = None
+    llm_model: str = DEFAULT_LLM_MODEL
 
 
 def load_config() -> BotConfig:
@@ -38,7 +43,12 @@ def load_config() -> BotConfig:
         )
 
     openrouter_key = os.getenv("OPENROUTER_API_KEY")
+    llm_model = os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL)
 
-    return BotConfig(bot_token=token, openrouter_api_key=openrouter_key)
+    return BotConfig(
+        bot_token=token,
+        openrouter_api_key=openrouter_key,
+        llm_model=llm_model,
+    )
 
 

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiogram.types import Message, User, Chat
 
+from src.bot.config import BotConfig
 from src.bot.routers.chatgpt import (
     _is_in_chat_mode,
     _start_chat_mode,
@@ -14,6 +15,18 @@ from src.bot.routers.chatgpt import (
     _add_user_message,
     _add_assistant_message,
 )
+
+
+def create_mock_config(
+    api_key: str | None = "test_api_key",
+    llm_model: str = "test-model",
+) -> BotConfig:
+    """Создаёт мок-объект BotConfig для тестов."""
+    return BotConfig(
+        bot_token="test_bot_token",
+        openrouter_api_key=api_key,
+        llm_model=llm_model,
+    )
 
 
 def create_mock_message(text: str, user_id: int = 123) -> Message:
@@ -154,12 +167,13 @@ async def test_handle_chat_message_ignores_when_not_in_mode() -> None:
     from src.bot.routers.chatgpt import handle_chat_message
 
     message = create_mock_message("Обычное сообщение")
+    config = create_mock_config()
     user_id = message.from_user.id if message.from_user else 0
 
     # Убеждаемся, что режим не активирован
     _stop_chat_mode(user_id)
 
-    await handle_chat_message(message)
+    await handle_chat_message(message, config)
 
     # Проверяем, что сообщение не обработано
     message.answer.assert_not_called()
@@ -171,13 +185,11 @@ async def test_handle_chat_message_processes_in_mode() -> None:
     from src.bot.routers.chatgpt import handle_chat_message
 
     message = create_mock_message("Привет, как дела?")
+    config = create_mock_config()
     user_id = message.from_user.id if message.from_user else 0
 
     # Активируем режим
     _start_chat_mode(user_id)
-
-    # Устанавливаем API ключ в боте
-    message.bot._openrouter_api_key = "test_api_key"
 
     # Мокаем ответ от LLM
     mock_llm_response = "Привет! У меня всё отлично, спасибо!"
@@ -185,7 +197,7 @@ async def test_handle_chat_message_processes_in_mode() -> None:
     with patch("src.bot.routers.chatgpt.get_llm_response") as mock_get_llm:
         mock_get_llm.return_value = mock_llm_response
 
-        await handle_chat_message(message)
+        await handle_chat_message(message, config)
 
         # Проверяем, что отправлен запрос к LLM
         mock_get_llm.assert_called_once()
@@ -208,15 +220,13 @@ async def test_handle_chat_message_no_api_key() -> None:
     from src.bot.routers.chatgpt import handle_chat_message
 
     message = create_mock_message("Привет")
+    config = create_mock_config(api_key=None)  # Без API ключа
     user_id = message.from_user.id if message.from_user else 0
 
     # Активируем режим
     _start_chat_mode(user_id)
 
-    # Не устанавливаем API ключ
-    message.bot._openrouter_api_key = None
-
-    await handle_chat_message(message)
+    await handle_chat_message(message, config)
 
     # Проверяем, что отправлено сообщение об ошибке
     message.answer.assert_called_once()
@@ -233,12 +243,13 @@ async def test_handle_chat_message_ignores_commands() -> None:
     from src.bot.routers.chatgpt import handle_chat_message
 
     message = create_mock_message("/start")
+    config = create_mock_config()
     user_id = message.from_user.id if message.from_user else 0
 
     # Активируем режим
     _start_chat_mode(user_id)
 
-    await handle_chat_message(message)
+    await handle_chat_message(message, config)
 
     # Проверяем, что сообщение не обработано (команды обрабатываются другими роутерами)
     message.answer.assert_not_called()
@@ -253,12 +264,13 @@ async def test_handle_chat_message_empty_text() -> None:
     from src.bot.routers.chatgpt import handle_chat_message
 
     message = create_mock_message("")
+    config = create_mock_config()
     user_id = message.from_user.id if message.from_user else 0
 
     # Активируем режим
     _start_chat_mode(user_id)
 
-    await handle_chat_message(message)
+    await handle_chat_message(message, config)
 
     # Проверяем, что отправлено сообщение с просьбой отправить текст
     message.answer.assert_called_once()

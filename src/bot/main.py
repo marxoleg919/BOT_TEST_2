@@ -30,9 +30,9 @@ async def main() -> None:
     config = load_config()
 
     bot = Bot(token=config.bot_token)
-    # Сохраняем API ключ OpenRouter в bot для доступа из роутеров
-    bot._openrouter_api_key = config.openrouter_api_key
+    # Передаём конфигурацию через workflow_data для доступа из роутеров
     dp = Dispatcher()
+    dp["config"] = config
 
     # Подключаем корневой роутер со всеми обработчиками
     dp.include_router(get_main_router())

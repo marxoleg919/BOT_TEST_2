@@ -2,11 +2,8 @@
 Сервис работы с текстами сообщений.
 
 Здесь нет зависимостей от aiogram и Telegram API.
+Все функции работают только с примитивными типами Python.
 """
-
-from typing import Optional
-
-from aiogram.types import User
 
 
 def make_echo_reply(text: str) -> str:
@@ -41,23 +38,6 @@ def make_start_message() -> str:
     )
 
 
-def make_profile_message(user: Optional[User]) -> str:
-    """
-    Возвращает сообщение с информацией о профиле пользователя.
-    """
-    if user is None:
-        return "❌ Не удалось получить информацию о профиле."
-
-    username = f"@{user.username}" if user.username else "не указан"
-    full_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or "не указано"
-
-    return (
-        f"👤 Профиль\n\n"
-        f"🆔 ID: {user.id}\n"
-        f"👤 Имя: {full_name}\n"
-        f"📱 Username: {username}\n"
-        f"🌐 Язык: {user.language_code or 'не указан'}"
-    )
 
 
 def make_premium_message() -> str:

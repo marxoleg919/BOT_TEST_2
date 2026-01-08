@@ -11,24 +11,11 @@ from aiogram import Router
 from aiogram.types import Message
 
 from src.bot.services.text import make_echo_reply
+from src.bot.utils.formatting import format_user_for_log
 
 logger = logging.getLogger("bot")
 
 router = Router()
-
-
-def _format_user(message: Message) -> str:
-    """
-    Вспомогательная функция для формирования строки с информацией о пользователе.
-    Используется только для логирования.
-    """
-    user = message.from_user
-    if user is None:
-        return "неизвестный пользователь"
-
-    username = f"@{user.username}" if user.username else "без username"
-    full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
-    return f"id={user.id}, {username}, имя='{full_name}'"
 
 
 @router.message()
@@ -41,7 +28,7 @@ async def echo_message(message: Message) -> None:
     """
     logger.info(
         "Получено сообщение от пользователя %s: %r",
-        _format_user(message),
+        format_user_for_log(message),
         message.text,
     )
 

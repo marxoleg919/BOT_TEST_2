@@ -5,35 +5,25 @@
 """
 
 import logging
-from typing import Optional
 
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from src.bot.config import BotConfig
 from src.bot.services.llm import ModelNotFoundError, RateLimitError, get_llm_response
+from src.bot.utils.formatting import format_user_for_log
 
 logger = logging.getLogger("bot")
 
 router = Router()
 
+# Максимальное количество сообщений в истории диалога (пар user + assistant)
+MAX_HISTORY_MESSAGES = 20
+
 # Хранилище истории диалогов: user_id -> список сообщений
 # Формат: [{"role": "user", "content": "текст"}, {"role": "assistant", "content": "ответ"}]
 _chat_histories: dict[int, list[dict[str, str]]] = {}
-
-
-def _format_user(message: Message) -> str:
-    """
-    Вспомогательная функция для формирования строки с информацией о пользователе.
-    Используется только для логирования.
-    """
-    user = message.from_user
-    if user is None:
-        return "неизвестный пользователь"
-
-    username = f"@{user.username}" if user.username else "без username"
-    full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
-    return f"id={user.id}, {username}, имя='{full_name}'"
 
 
 def _is_in_chat_mode(user_id: int) -> bool:
@@ -56,6 +46,7 @@ def _add_user_message(user_id: int, content: str) -> None:
     if user_id not in _chat_histories:
         _start_chat_mode(user_id)
     _chat_histories[user_id].append({"role": "user", "content": content})
+    _trim_history(user_id)
 
 
 def _add_assistant_message(user_id: int, content: str) -> None:
@@ -63,6 +54,17 @@ def _add_assistant_message(user_id: int, content: str) -> None:
     if user_id not in _chat_histories:
         _start_chat_mode(user_id)
     _chat_histories[user_id].append({"role": "assistant", "content": content})
+    _trim_history(user_id)
+
+
+def _trim_history(user_id: int) -> None:
+    """Обрезает историю диалога до максимального размера."""
+    if user_id not in _chat_histories:
+        return
+    history = _chat_histories[user_id]
+    if len(history) > MAX_HISTORY_MESSAGES:
+        # Удаляем старые сообщения, сохраняя последние MAX_HISTORY_MESSAGES
+        _chat_histories[user_id] = history[-MAX_HISTORY_MESSAGES:]
 
 
 @router.message(Command("chatgpt"))
@@ -77,7 +79,7 @@ async def cmd_chatgpt(message: Message) -> None:
         await message.answer("❌ Не удалось определить пользователя.")
         return
 
-    logger.info("Команда /chatgpt от пользователя: %s", _format_user(message))
+    logger.info("Команда /chatgpt от пользователя: %s", format_user_for_log(message))
 
     _start_chat_mode(user.id)
     await message.answer(
@@ -100,7 +102,7 @@ async def cmd_stop(message: Message) -> None:
         await message.answer("❌ Не удалось определить пользователя.")
         return
 
-    logger.info("Команда /stop от пользователя: %s", _format_user(message))
+    logger.info("Команда /stop от пользователя: %s", format_user_for_log(message))
 
     if _is_in_chat_mode(user.id):
         _stop_chat_mode(user.id)
@@ -110,11 +112,15 @@ async def cmd_stop(message: Message) -> None:
 
 
 @router.message()
-async def handle_chat_message(message: Message) -> None:
+async def handle_chat_message(message: Message, config: BotConfig) -> None:
     """
     Обработчик текстовых сообщений в режиме ChatGPT.
 
     Обрабатывает только сообщения от пользователей, которые находятся в режиме ChatGPT.
+
+    Args:
+        message: Сообщение от пользователя
+        config: Конфигурация бота (передаётся через workflow_data)
     """
     user = message.from_user
     if user is None:
@@ -135,19 +141,17 @@ async def handle_chat_message(message: Message) -> None:
 
     logger.info(
         "Сообщение в режиме ChatGPT от пользователя %s: %r",
-        _format_user(message),
+        format_user_for_log(message),
         user_text[:100],  # Логируем только первые 100 символов
     )
 
     try:
-        # Получаем бота для отправки действий и API ключа
-        bot = message.bot
-        
         # Отправляем действие "печатает..."
+        bot = message.bot
         await bot.send_chat_action(chat_id=message.chat.id, action="typing")
-        api_key: Optional[str] = getattr(bot, "_openrouter_api_key", None)
 
-        if not api_key:
+        # Проверяем наличие API ключа
+        if not config.openrouter_api_key:
             await message.answer(
                 "❌ Ошибка: API ключ OpenRouter не настроен. "
                 "Обратитесь к администратору."
@@ -161,8 +165,10 @@ async def handle_chat_message(message: Message) -> None:
         # Получаем историю диалога
         history = _chat_histories[user.id].copy()
 
-        # Отправляем запрос к LLM
-        response_text = await get_llm_response(api_key, history)
+        # Отправляем запрос к LLM с моделью из конфигурации
+        response_text = await get_llm_response(
+            config.openrouter_api_key, history, model=config.llm_model
+        )
 
         # Добавляем ответ в историю
         _add_assistant_message(user.id, response_text)
