@@ -1,15 +1,17 @@
 """
 Роутер для команды /convert.
 
-Обрабатывает команду конвертации валют.
+Обрабатывает команду конвертации валют с использованием inline-кнопок для выбора валют.
 """
 
 import logging
-import re
+from typing import Any
 
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 from src.bot.services.currency import (
     SUPPORTED_CURRENCIES,
@@ -23,159 +25,140 @@ logger = logging.getLogger("bot")
 router = Router()
 
 
-def parse_convert_command(text: str) -> tuple[float | None, str | None, str | None]:
+class ConvertStates(StatesGroup):
+    """Состояния для конечного автомата конвертации валют."""
+    waiting_for_currency = State()  # Ожидание выбора валюты
+    waiting_for_amount = State()   # Ожидание ввода суммы
+
+
+def get_currency_keyboard() -> InlineKeyboardMarkup:
     """
-    Парсит команду конвертации валют.
-
-    Поддерживаемые форматы:
-    - /convert 100 USD EUR
-    - /convert 100 USD to EUR
-    - /convert 100 USD-EUR
-    - /convert 100USD EUR
-    - /convert 100 USDEUR
-
-    Args:
-        text: Текст команды с аргументами
-
+    Создает inline-клавиатуру с 10 поддерживаемыми валютами.
+    
     Returns:
-        Кортеж (сумма, базовая валюта, целевая валюта) или (None, None, None) при ошибке
+        InlineKeyboardMarkup: Клавиатура с кнопками валют
     """
-    # Убираем команду /convert
-    args_text = text.replace("/convert", "").strip()
-
-    if not args_text:
-        return None, None, None
-
-    # Паттерн для поиска суммы (число с возможной точкой/запятой)
-    # и двух кодов валют (3 заглавные буквы)
-    pattern = r"(\d+(?:[.,]\d+)?)\s*([A-Z]{3})\s*(?:to|[-]|\s)?\s*([A-Z]{3})"
-    match = re.search(pattern, args_text.upper())
-
-    if not match:
-        # Попробуем найти сумму и валюты отдельно
-        # Ищем сумму в начале
-        amount_match = re.search(r"(\d+(?:[.,]\d+)?)", args_text)
-        # Ищем коды валют (3 заглавные буквы)
-        currency_matches = re.findall(r"([A-Z]{3})", args_text.upper())
-
-        if amount_match and len(currency_matches) >= 2:
-            amount_str = amount_match.group(1).replace(",", ".")
-            try:
-                amount = float(amount_str)
-                base_currency = currency_matches[0]
-                target_currency = currency_matches[1]
-                return amount, base_currency, target_currency
-            except ValueError:
-                return None, None, None
-
-        return None, None, None
-
-    amount_str = match.group(1).replace(",", ".")
-    try:
-        amount = float(amount_str)
-        base_currency = match.group(2).upper()
-        target_currency = match.group(3).upper()
-        return amount, base_currency, target_currency
-    except ValueError:
-        return None, None, None
+    # Получаем список из 10 валют
+    currencies = list(SUPPORTED_CURRENCIES.items())[:10]
+    
+    # Создаем кнопки по 2 в ряд
+    buttons = []
+    for i in range(0, len(currencies), 2):
+        row = []
+        # Добавляем первую валюту в ряду
+        code1, name1 = currencies[i]
+        row.append(InlineKeyboardButton(
+            text=f"{code1} - {name1}",
+            callback_data=f"currency:{code1}"
+        ))
+        
+        # Добавляем вторую валюту, если есть
+        if i + 1 < len(currencies):
+            code2, name2 = currencies[i + 1]
+            row.append(InlineKeyboardButton(
+                text=f"{code2} - {name2}",
+                callback_data=f"currency:{code2}"
+            ))
+        
+        buttons.append(row)
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 @router.message(Command("convert"))
-async def cmd_convert(message: Message) -> None:
+async def cmd_convert(message: Message, state: FSMContext) -> None:
     """
     Обработчик команды /convert.
-
-    Конвертирует сумму из одной валюты в другую.
-    Формат: /convert <сумма> <базовая валюта> <целевая валюта>
-    Пример: /convert 100 USD EUR
+    
+    Отправляет пользователю меню с выбором валюты.
     """
     logger.info("Команда /convert от пользователя: %s", format_user_for_log(message))
+    
+    # Отправляем сообщение с клавиатурой выбора валюты
+    keyboard = get_currency_keyboard()
+    await message.answer(
+        "💱 Выберите валюту для конвертации:",
+        reply_markup=keyboard
+    )
+    
+    # Устанавливаем состояние ожидания выбора валюты
+    await state.set_state(ConvertStates.waiting_for_currency)
 
-    # Получаем полный текст сообщения
-    command_text = message.text or ""
 
-    # Парсим аргументы команды
-    amount, base_currency, target_currency = parse_convert_command(command_text)
+@router.callback_query(ConvertStates.waiting_for_currency, F.data.startswith("currency:"))
+async def callback_currency_selected(callback: CallbackQuery, state: FSMContext) -> None:
+    """
+    Обработчик выбора валюты через inline-кнопки.
+    
+    Args:
+        callback: CallbackQuery объект
+        state: FSMContext для управления состоянием
+    """
+    # Извлекаем код валюты из callback_data
+    currency_code = callback.data.split(":")[1]
+    
+    # Сохраняем выбранную валюту в состоянии
+    await state.update_data(selected_currency=currency_code)
+    
+    # Отправляем подтверждение выбора
+    currency_name = SUPPORTED_CURRENCIES.get(currency_code, currency_code)
+    await callback.message.edit_text(
+        f"✅ Вы выбрали валюту: {currency_code} ({currency_name})\n\n"
+        f"📝 Теперь введите сумму для конвертации:"
+    )
+    
+    # Переходим к следующему состоянию - ожидание ввода суммы
+    await state.set_state(ConvertStates.waiting_for_amount)
+    
+    # Отвечаем на callback, чтобы убрать "часики"
+    await callback.answer()
 
-    # Проверяем, что все аргументы распознаны
-    if amount is None or base_currency is None or target_currency is None:
-        # Определяем, была ли команда вызвана просто без аргументов или с неправильными аргументами
-        args_text = command_text.replace("/convert", "").strip()
-        is_empty = not args_text
-        
-        currencies_list = ", ".join(SUPPORTED_CURRENCIES.keys())
-        
-        if is_empty:
-            # Команда вызвана без аргументов - показываем дружелюбное сообщение
-            await message.answer(
-                "💱 Конвертер валют\n\n"
-                "Эта команда позволяет конвертировать суммы из одной валюты в другую.\n\n"
-                "📝 Использование:\n"
-                "/convert <сумма> <базовая валюта> <целевая валюта>\n\n"
-                "📌 Примеры:\n"
-                "• /convert 100 USD EUR\n"
-                "• /convert 100 USD to EUR\n"
-                "• /convert 1000 RUB USD\n"
-                "• /convert 50.5 EUR GBP\n\n"
-                f"💵 Поддерживаемые валюты:\n{currencies_list}\n\n"
-                "💡 Подсказка: вы можете использовать слово 'to' между валютами или просто пробел."
-            )
-        else:
-            # Команда вызвана с аргументами, но они не распознаны - показываем ошибку
-            await message.answer(
-                "❌ Неверный формат команды.\n\n"
-                "📝 Использование:\n"
-                "/convert <сумма> <базовая валюта> <целевая валюта>\n\n"
-                "📌 Примеры:\n"
-                "• /convert 100 USD EUR\n"
-                "• /convert 100 USD to EUR\n"
-                "• /convert 1000 RUB USD\n\n"
-                f"💵 Поддерживаемые валюты: {currencies_list}"
-            )
+
+@router.message(ConvertStates.waiting_for_amount)
+async def process_amount_input(message: Message, state: FSMContext) -> None:
+    """
+    Обработчик ввода суммы для конвертации.
+    
+    Args:
+        message: Сообщение с суммой
+        state: FSMContext для управления состоянием
+    """
+    # Получаем выбранную валюту из состояния
+    user_data = await state.get_data()
+    currency_code = user_data.get("selected_currency")
+    
+    if not currency_code:
+        # Если каким-то образом потеряли валюту, начинаем сначала
+        await message.answer("❌ Произошла ошибка. Пожалуйста, начните сначала с команды /convert")
+        await state.clear()
         return
-
+    
+    # Проверяем, что введено число
+    try:
+        amount = float(message.text.replace(",", "."))
+    except (ValueError, AttributeError):
+        await message.answer("❌ Пожалуйста, введите корректное число для суммы.")
+        return
+    
     # Проверяем, что сумма положительная
     if amount <= 0:
         await message.answer("❌ Сумма должна быть положительным числом.")
         return
-
-    # Проверяем, что валюты поддерживаются
-    if base_currency not in SUPPORTED_CURRENCIES:
-        await message.answer(
-            f"❌ Неподдерживаемая базовая валюта: {base_currency}\n\n"
-            f"Поддерживаемые валюты: {', '.join(SUPPORTED_CURRENCIES.keys())}"
-        )
-        return
-
-    if target_currency not in SUPPORTED_CURRENCIES:
-        await message.answer(
-            f"❌ Неподдерживаемая целевая валюта: {target_currency}\n\n"
-            f"Поддерживаемые валюты: {', '.join(SUPPORTED_CURRENCIES.keys())}"
-        )
-        return
-
-    # Проверяем, что валюты разные
-    if base_currency == target_currency:
-        await message.answer(
-            f"❌ Базовая и целевая валюты не могут быть одинаковыми: {base_currency}"
-        )
-        return
-
+    
     # Отправляем сообщение о начале конвертации
     await message.answer("⏳ Получаю актуальный курс валют...")
-
-    # Выполняем конвертацию
+    
+    # Выполняем конвертацию в USD как пример
     converted_amount, rate = await convert_currency(
-        amount, base_currency, target_currency
+        amount, currency_code, "USD"  # Конвертируем в USD для примера
     )
-
+    
     # Проверяем результат
     if converted_amount is None or rate is None:
         logger.error(
-            "Ошибка конвертации валют: amount=%s, base=%s, target=%s",
+            "Ошибка конвертации валют: amount=%s, base=%s, target=USD",
             amount,
-            base_currency,
-            target_currency,
+            currency_code,
         )
         await message.answer(
             "❌ Не удалось получить курс валют. Попробуйте позже.\n\n"
@@ -183,18 +166,22 @@ async def cmd_convert(message: Message) -> None:
             "• Проблемы с подключением к серверу курсов валют\n"
             "• Временная недоступность API"
         )
+        await state.clear()
         return
-
+    
     # Форматируем и отправляем результат
     result_text = format_currency_result(
-        amount, base_currency, converted_amount, target_currency, rate
+        amount, currency_code, converted_amount, "USD", rate
     )
     await message.answer(result_text)
+    
     logger.info(
-        "Конвертация выполнена: %.2f %s -> %.2f %s (курс: %.4f)",
+        "Конвертация выполнена: %.2f %s -> %.2f USD (курс: %.4f)",
         amount,
-        base_currency,
+        currency_code,
         converted_amount,
-        target_currency,
         rate,
     )
+    
+    # Очищаем состояние
+    await state.clear()
