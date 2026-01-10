@@ -59,39 +59,43 @@ async def get_exchange_rate(base_currency: str, target_currency: str) -> float |
             # Получаем курсы относительно базовой валюты
             # Формат URL: https://open.er-api.com/v6/latest/{BASE_CURRENCY}
             url = f"{EXCHANGE_RATE_API_URL}/{base_currency}"
-            logger.debug("Запрос курса валют: %s", url)
+            logger.info("Запрос курса валют: %s -> %s, URL: %s", base_currency, target_currency, url)
             
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as response:
                 if response.status != 200:
+                    response_text = await response.text()
                     logger.error(
-                        "Ошибка при получении курса валют: статус %s, URL: %s",
+                        "Ошибка при получении курса валют: статус %s, URL: %s, ответ: %s",
                         response.status,
                         url,
+                        response_text[:200],  # Первые 200 символов ответа
                     )
                     return None
 
                 data: dict[str, Any] = await response.json()
-                logger.debug("Ответ API получен: result=%s", data.get("result"))
+                logger.info("Ответ API получен: result=%s, base_code=%s", 
+                           data.get("result"), data.get("base_code"))
 
                 # Проверяем результат API (формат: {"result": "success", "rates": {...}})
                 if data.get("result") != "success":
                     error_msg = data.get("error", "Unknown error")
-                    logger.error("API вернул ошибку: %s", error_msg)
+                    logger.error("API вернул ошибку: %s, полный ответ: %s", error_msg, data)
                     return None
 
                 # Получаем курсы валют
                 rates = data.get("rates")
                 
                 if not rates:
-                    logger.error("Не найдено поле rates в ответе API")
+                    logger.error("Не найдено поле rates в ответе API. Ответ: %s", data)
                     return None
 
                 # Проверяем наличие целевой валюты в курсах
                 if target_currency not in rates:
+                    available_currencies = list(rates.keys())[:20]
                     logger.error(
-                        "Валюта %s не найдена в ответе API. Доступные валюты: %s",
+                        "Валюта %s не найдена в ответе API. Доступные валюты (первые 20): %s",
                         target_currency,
-                        ", ".join(list(rates.keys())[:15]),  # Показываем первые 15 для отладки
+                        ", ".join(available_currencies),
                     )
                     return None
 
@@ -106,13 +110,15 @@ async def get_exchange_rate(base_currency: str, target_currency: str) -> float |
                 return rate
 
     except aiohttp.ClientError as e:
-        logger.error("Ошибка сети при получении курса валют: %s", e, exc_info=True)
+        logger.error("Ошибка сети при получении курса валют: %s, тип: %s", 
+                    e, type(e).__name__, exc_info=True)
         return None
     except (ValueError, KeyError) as e:
-        logger.error("Ошибка парсинга ответа API: %s", e, exc_info=True)
+        logger.error("Ошибка парсинга ответа API: %s, тип: %s", e, type(e).__name__, exc_info=True)
         return None
     except Exception as e:
-        logger.error("Неожиданная ошибка при получении курса: %s", e, exc_info=True)
+        logger.error("Неожиданная ошибка при получении курса: %s, тип: %s", 
+                    e, type(e).__name__, exc_info=True)
         return None
 
 
