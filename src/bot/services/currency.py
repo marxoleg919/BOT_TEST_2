@@ -27,7 +27,8 @@ SUPPORTED_CURRENCIES = {
 }
 
 # Базовый URL для получения курсов валют (бесплатный API без ключа)
-EXCHANGE_RATE_API_URL = "https://api.exchangerate.host/latest"
+# Используем open.er-api.com - более надежный бесплатный API
+EXCHANGE_RATE_API_URL = "https://open.er-api.com/v6/latest"
 
 
 async def get_exchange_rate(base_currency: str, target_currency: str) -> float | None:
@@ -56,47 +57,46 @@ async def get_exchange_rate(base_currency: str, target_currency: str) -> float |
     try:
         async with aiohttp.ClientSession() as session:
             # Получаем курсы относительно базовой валюты
-            # Пробуем использовать параметр base (старый формат) или source (новый формат)
-            url = f"{EXCHANGE_RATE_API_URL}?base={base_currency}"
+            # Формат URL: https://open.er-api.com/v6/latest/{BASE_CURRENCY}
+            url = f"{EXCHANGE_RATE_API_URL}/{base_currency}"
+            logger.debug("Запрос курса валют: %s", url)
+            
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status != 200:
                     logger.error(
-                        "Ошибка при получении курса валют: статус %s", response.status
+                        "Ошибка при получении курса валют: статус %s, URL: %s",
+                        response.status,
+                        url,
                     )
                     return None
 
                 data: dict[str, Any] = await response.json()
+                logger.debug("Ответ API получен: result=%s", data.get("result"))
 
-                if not data.get("success", False):
-                    logger.error("API вернул ошибку: %s", data.get("error", "Unknown"))
+                # Проверяем результат API (формат: {"result": "success", "rates": {...}})
+                if data.get("result") != "success":
+                    error_msg = data.get("error", "Unknown error")
+                    logger.error("API вернул ошибку: %s", error_msg)
                     return None
 
-                # Пытаемся получить курсы из разных полей (rates или quotes)
-                rates = data.get("rates") or data.get("quotes")
+                # Получаем курсы валют
+                rates = data.get("rates")
                 
                 if not rates:
-                    logger.error("Не найдено поле rates или quotes в ответе API")
+                    logger.error("Не найдено поле rates в ответе API")
                     return None
 
-                # Если используется формат quotes (USDEUR), нужно преобразовать
-                # Иначе используется формат rates (EUR: 0.919677)
-                rate = None
-                
-                # Проверяем формат quotes (USDEUR, EURGBP и т.д.)
-                quote_key = f"{base_currency}{target_currency}"
-                if quote_key in rates:
-                    rate = float(rates[quote_key])
-                # Проверяем формат rates (EUR: 0.919677)
-                elif target_currency in rates:
-                    rate = float(rates[target_currency])
-                else:
+                # Проверяем наличие целевой валюты в курсах
+                if target_currency not in rates:
                     logger.error(
-                        "Валюта %s не найдена в ответе API. Доступные ключи: %s",
+                        "Валюта %s не найдена в ответе API. Доступные валюты: %s",
                         target_currency,
-                        list(rates.keys())[:10],  # Показываем первые 10 для отладки
+                        ", ".join(list(rates.keys())[:15]),  # Показываем первые 15 для отладки
                     )
                     return None
 
+                rate = float(rates[target_currency])
+                
                 logger.info(
                     "Получен курс: 1 %s = %.4f %s",
                     base_currency,
