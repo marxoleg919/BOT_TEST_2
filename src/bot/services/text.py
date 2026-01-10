@@ -79,6 +79,7 @@ def make_help_message() -> str:
         "• /start - Перезапустить бота (Выбрать нейросеть)\n"
         "• /chatgpt - Активировать режим ChatGPT (общение с LLM)\n"
         "• /stop - Выйти из режима ChatGPT\n"
+        "• /convert - Конвертер валют\n"
         "• /profile - Просмотреть профиль\n"
         "• /premium - Информация о Premium подписке\n"
         "• /language - Изменить язык интерфейса\n"

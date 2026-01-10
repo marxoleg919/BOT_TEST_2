@@ -61,7 +61,6 @@ async def main() -> None:
     # Устанавливаем меню команд бота
     try:
         await set_bot_commands(bot)
-        logger.info("Меню команд успешно установлено")
     except Exception as e:
         logger.error("Ошибка при установке меню команд: %s", e, exc_info=True)
 

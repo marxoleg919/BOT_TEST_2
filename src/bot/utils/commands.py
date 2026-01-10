@@ -24,6 +24,7 @@ COMMANDS_SPEC: tuple[CommandSpec, ...] = (
     CommandSpec("start", "Restart bot (Выбрать нейросеть)"),
     CommandSpec("chatgpt", "ChatGPT mode (Режим ChatGPT)"),
     CommandSpec("stop", "Stop ChatGPT mode (Выйти из режима ChatGPT)", in_menu=True),
+    CommandSpec("convert", "Currency converter (Конвертер валют)"),
     CommandSpec("profile", "Profile (Профиль)"),
     CommandSpec("premium", "Premium"),
     CommandSpec("language", "Language (Язык)"),
@@ -42,5 +43,15 @@ def iter_menu_commands(specs: Iterable[CommandSpec]) -> list[BotCommand]:
 
 async def set_bot_commands(bot: Bot) -> None:
     """Устанавливает меню команд для бота."""
-    await bot.set_my_commands(iter_menu_commands(COMMANDS_SPEC))
+    import logging
+    
+    logger = logging.getLogger("bot")
+    commands = iter_menu_commands(COMMANDS_SPEC)
+    
+    # Логируем команды, которые будут установлены
+    command_names = [cmd.command for cmd in commands]
+    logger.info("Устанавливаем меню команд: %s", ", ".join(command_names))
+    
+    await bot.set_my_commands(commands)
+    logger.info("Меню команд успешно установлено в Telegram")
 

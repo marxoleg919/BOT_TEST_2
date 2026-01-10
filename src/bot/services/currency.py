@@ -56,6 +56,7 @@ async def get_exchange_rate(base_currency: str, target_currency: str) -> float |
     try:
         async with aiohttp.ClientSession() as session:
             # Получаем курсы относительно базовой валюты
+            # Пробуем использовать параметр base (старый формат) или source (новый формат)
             url = f"{EXCHANGE_RATE_API_URL}?base={base_currency}"
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status != 200:
@@ -70,14 +71,32 @@ async def get_exchange_rate(base_currency: str, target_currency: str) -> float |
                     logger.error("API вернул ошибку: %s", data.get("error", "Unknown"))
                     return None
 
-                rates = data.get("rates", {})
-                if target_currency not in rates:
+                # Пытаемся получить курсы из разных полей (rates или quotes)
+                rates = data.get("rates") or data.get("quotes")
+                
+                if not rates:
+                    logger.error("Не найдено поле rates или quotes в ответе API")
+                    return None
+
+                # Если используется формат quotes (USDEUR), нужно преобразовать
+                # Иначе используется формат rates (EUR: 0.919677)
+                rate = None
+                
+                # Проверяем формат quotes (USDEUR, EURGBP и т.д.)
+                quote_key = f"{base_currency}{target_currency}"
+                if quote_key in rates:
+                    rate = float(rates[quote_key])
+                # Проверяем формат rates (EUR: 0.919677)
+                elif target_currency in rates:
+                    rate = float(rates[target_currency])
+                else:
                     logger.error(
-                        "Валюта %s не найдена в ответе API", target_currency
+                        "Валюта %s не найдена в ответе API. Доступные ключи: %s",
+                        target_currency,
+                        list(rates.keys())[:10],  # Показываем первые 10 для отладки
                     )
                     return None
 
-                rate = float(rates[target_currency])
                 logger.info(
                     "Получен курс: 1 %s = %.4f %s",
                     base_currency,
